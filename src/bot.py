@@ -504,7 +504,8 @@ async def delete_webhook_and_start(application: Application):
         # Then delete webhook and start polling
         await application.bot.delete_webhook(drop_pending_updates=True)
         await application.start()
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Run polling without awaiting it
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         raise
