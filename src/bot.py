@@ -496,21 +496,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHOOSING_ACTION
 
-async def delete_webhook_and_start(application: Application):
-    """Delete webhook and start polling."""
-    try:
-        # Initialize the application first
-        await application.initialize()
-        # Then delete webhook and start polling
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        await application.start()
-        # Run polling without awaiting it
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
-    except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        raise
-
-async def main():
+def main():
     """Start the bot."""
     # Load token from environment variable
     token = os.getenv('TELEGRAM_TOKEN')
@@ -534,9 +520,8 @@ async def main():
 
     application.add_handler(conv_handler)
 
-    # Run the bot
-    await delete_webhook_and_start(application)
+    # Run the bot with polling
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    # Run the main function
-    asyncio.run(main()) 
+    main() 
