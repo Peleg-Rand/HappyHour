@@ -497,8 +497,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot."""
-    application = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).build()
+    # Load token from environment variable
+    token = os.getenv('TELEGRAM_TOKEN')
+    if not token:
+        raise ValueError("No TELEGRAM_TOKEN found in environment variables")
 
+    # Create application
+    application = Application.builder().token(token).build()
+
+    # Remove webhook before polling
+    application.bot.delete_webhook()
+
+    # Add handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -511,7 +521,9 @@ def main():
     )
 
     application.add_handler(conv_handler)
-    application.run_polling()
+
+    # Start the bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main() 
