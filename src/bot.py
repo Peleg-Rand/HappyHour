@@ -509,7 +509,7 @@ async def delete_webhook_and_start(application: Application):
         logger.error(f"Error starting bot: {e}")
         raise
 
-def main():
+async def main():
     """Start the bot."""
     # Load token from environment variable
     token = os.getenv('TELEGRAM_TOKEN')
@@ -533,8 +533,9 @@ def main():
 
     application.add_handler(conv_handler)
 
-    # Run the bot using asyncio
-    asyncio.run(delete_webhook_and_start(application))
+    # Run the bot
+    await delete_webhook_and_start(application)
 
 if __name__ == "__main__":
-    main() 
+    # Run the main function
+    asyncio.run(main()) 
