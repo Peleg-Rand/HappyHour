@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -495,6 +496,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHOOSING_ACTION
 
+async def delete_webhook_and_start(application: Application):
+    """Delete webhook and start polling."""
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        await application.start()
+        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        raise
+
 def main():
     """Start the bot."""
     # Load token from environment variable
@@ -504,9 +515,6 @@ def main():
 
     # Create application
     application = Application.builder().token(token).build()
-
-    # Remove webhook before polling
-    application.bot.delete_webhook()
 
     # Add handlers
     conv_handler = ConversationHandler(
@@ -522,8 +530,8 @@ def main():
 
     application.add_handler(conv_handler)
 
-    # Start the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Run the bot
+    asyncio.run(delete_webhook_and_start(application))
 
 if __name__ == "__main__":
     main() 
