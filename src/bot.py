@@ -499,6 +499,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_webhook_and_start(application: Application):
     """Delete webhook and start polling."""
     try:
+        # Initialize the application first
+        await application.initialize()
+        # Then delete webhook and start polling
         await application.bot.delete_webhook(drop_pending_updates=True)
         await application.start()
         await application.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -530,7 +533,7 @@ def main():
 
     application.add_handler(conv_handler)
 
-    # Run the bot
+    # Run the bot using asyncio
     asyncio.run(delete_webhook_and_start(application))
 
 if __name__ == "__main__":
