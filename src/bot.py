@@ -198,29 +198,28 @@ def create_location_keyboard(lang):
 
 def format_place_details(place, area, lang):
     """Format place details with navigation link"""
-    name = place['name'][lang] if isinstance(place['name'], dict) else place['name']
-    address = place['address']
-    coords = place.get('coords', '')
-    happy_hour = place.get('happy_hour', '')
-    deals = place.get('deals', {}).get(lang, '') if isinstance(place.get('deals'), dict) else place.get('deals', '')
-    vibe = place.get('vibe', {}).get(lang, '') if isinstance(place.get('vibe'), dict) else place.get('vibe', '')
-    price_range = place.get('price_range', '')
-    description = place.get('description', {}).get(lang, '') if isinstance(place.get('description'), dict) else place.get('description', '')
+    name = place.get('name', '')
+    address = place.get('address', '')
+    latitude = place.get('latitude', '')
+    longitude = place.get('longitude', '')
+    deal = place.get('deal', '')
+    hours = place.get('hours', '')
+    phone = place.get('phone', '')
+    website = place.get('website', '')
     
+    coords = f"{latitude},{longitude}" if latitude and longitude else ''
     maps_link = get_google_maps_link(coords) if coords else None
     
     details = f"*{name}*\n"
     details += f"📍 {address}\n"
-    if happy_hour:
-        details += f"⏰ Happy Hour: {happy_hour}\n"
-    if deals:
-        details += f"🎉 Deals: {deals}\n"
-    if vibe:
-        details += f"🌟 Vibe: {vibe}\n"
-    if price_range:
-        details += f"💰 Price Range: {price_range}\n"
-    if description:
-        details += f"\nℹ️ {description}\n"
+    if hours:
+        details += f"⏰ Hours: {hours}\n"
+    if deal:
+        details += f"🎉 Deal: {deal}\n"
+    if phone:
+        details += f"📞 Phone: {phone}\n"
+    if website:
+        details += f"🌐 Website: {website}\n"
     if maps_link:
         details += f"\n🗺 [Open in Maps]({maps_link})"
     
@@ -244,8 +243,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Calculate distances and sort venues
         nearby_venues = []
-        current_time = datetime.now().strftime("%H:%M")
-        
         for venue in venues:
             if venue.get('latitude') and venue.get('longitude'):
                 distance = calculate_distance(
@@ -256,15 +253,10 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if distance <= radius:  # Within specified radius
                     venue['distance'] = distance
-                    # Check if venue has current happy hour
-                    if venue.get('happy_hour'):
-                        start_time, end_time = venue['happy_hour'].split("-")
-                        if start_time <= current_time <= end_time:
-                            venue['has_current_happy_hour'] = True
                     nearby_venues.append(venue)
         
-        # Sort by distance and current happy hour status
-        nearby_venues.sort(key=lambda x: (not x.get('has_current_happy_hour', False), x['distance']))
+        # Sort by distance
+        nearby_venues.sort(key=lambda x: x['distance'])
         
         if not nearby_venues:
             await update.message.reply_text(get_text('no_nearby_venues', lang))
@@ -274,9 +266,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = get_text('nearby_header', lang) + "\n\n"
         for venue in nearby_venues[:5]:  # Show top 5 closest venues
             message += format_place_details(venue, None, lang)
-            if venue.get('has_current_happy_hour'):
-                message += "🔥 *Currently in Happy Hour!*\n"
-            message += f"📍 {venue['distance']:.1f}km away\n\n"
+            message += f"\n📍 {venue['distance']:.1f}km away\n\n"
         
         keyboard = create_refresh_keyboard(lang)
         await update.message.reply_text(
@@ -427,7 +417,7 @@ async def show_area_venues(update: Update, context: ContextTypes.DEFAULT_TYPE):
             venues = json.load(f)
         
         # Filter venues by area
-        area_venues = [venue for venue in venues if venue.get('area', '').lower() == area.lower()]
+        area_venues = [venue for venue in venues if area.lower() in venue.get('address', '').lower()]
         
         if not area_venues:
             await query.edit_message_text(
@@ -436,17 +426,10 @@ async def show_area_venues(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return CHOOSING_ACTION
         
-        # Check current time for happy hour status
-        current_time = datetime.now().strftime("%H:%M")
-        
         # Format message with venues
         message = get_text('area_header', lang, area) + "\n\n"
         for venue in area_venues[:5]:  # Show top 5 venues
             message += format_place_details(venue, area, lang)
-            if venue.get('happy_hour'):
-                start_time, end_time = venue['happy_hour'].split("-")
-                if start_time <= current_time <= end_time:
-                    message += f"\n🔥 {get_text('current_happy_hour', lang)}"
             message += "\n\n"
         
         keyboard = create_refresh_keyboard(lang)
