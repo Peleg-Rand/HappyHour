@@ -387,7 +387,7 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
+    application = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).build()
 
     # Add conversation handler with the states
     conv_handler = ConversationHandler(
