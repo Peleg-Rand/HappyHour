@@ -86,6 +86,15 @@ TRANSLATIONS = {
         'current_happy_hour': "🔥 Currently in Happy Hour!",
         'distance_away': "📍 {}km away",
         'choose_radius': "📍 Choose search radius:",
+        'choose_vibe': "🌟 Choose a vibe to explore venues:",
+        'no_vibe_venues': "😔 No venues found with that vibe. Try another one!",
+        'vibe_header': "🌟 Venues with {} vibe:",
+        'vibes': {
+            "Chill": "Chill",
+            "Trendy": "Trendy",
+            "Upscale": "Upscale",
+            "Casual": "Casual"
+        },
     },
     'he': {
         'welcome': (
@@ -142,6 +151,15 @@ TRANSLATIONS = {
         'current_happy_hour': "🔥 כרגע בהפי אוור!",
         'distance_away': "📍 {} ק\"מ מכאן",
         'choose_radius': "📍 בחר רדיוס חיפוש:",
+        'choose_vibe': "🌟 בחר אווירה לחיפוש מקומות:",
+        'no_vibe_venues': "😔 לא נמצאו מקומות עם אווירה זו. נסה אחרת!",
+        'vibe_header': "🌟 מקומות עם אווירת {}:",
+        'vibes': {
+            "Chill": "רגוע",
+            "Trendy": "טרנדי",
+            "Upscale": "יוקרתי",
+            "Casual": "יומיומי"
+        },
     }
 }
 
@@ -301,17 +319,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def create_main_menu_keyboard(lang):
     """Create the main menu keyboard with translated buttons."""
-    return [
+    return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(get_text('find_happy_hour', lang), callback_data="find"),
-            InlineKeyboardButton(get_text('current_happy_hours', lang), callback_data="current"),
+            InlineKeyboardButton(get_text('find_happy_hour', lang), callback_data="find_happy_hour"),
+            InlineKeyboardButton(get_text('find_nearby', lang), callback_data="find_nearby"),
         ],
         [
-            InlineKeyboardButton(get_text('popular_places', lang), callback_data="popular"),
+            InlineKeyboardButton(get_text('current_happy_hours', lang), callback_data="current_happy_hours"),
+            InlineKeyboardButton(get_text('popular_places', lang), callback_data="popular_places"),
+        ],
+        [
+            InlineKeyboardButton("🌟 Find by Vibe", callback_data="find_by_vibe"),
             InlineKeyboardButton(get_text('about', lang), callback_data="about"),
         ],
         [InlineKeyboardButton(get_text('change_language', lang), callback_data="change_lang")]
-    ]
+    ])
 
 def create_refresh_keyboard(lang):
     """Create keyboard with refresh and new search options."""
@@ -356,6 +378,13 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
         return WAITING_FOR_LOCATION
+    elif query.data == "find_by_vibe":
+        keyboard = create_vibe_keyboard(lang)
+        await query.edit_message_text(
+            text=get_text("choose_vibe", lang),
+            reply_markup=keyboard
+        )
+        return CHOOSING_VIBE
     elif query.data.startswith("radius_"):
         radius = int(query.data.split("_")[1])
         context.user_data["search_radius"] = radius
@@ -449,6 +478,76 @@ def create_area_keyboard(lang):
             callback_data=f"area_{area.lower()}"
         ))
         if (idx + 1) % 2 == 0 or idx == len(areas) - 1:
+            keyboard.append(row)
+            row = []
+    
+    keyboard.append([InlineKeyboardButton(get_text('main_menu', lang), callback_data="main_menu")])
+    return InlineKeyboardMarkup(keyboard)
+
+async def show_vibe_venues(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show venues with the selected vibe."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = context.user_data.get('lang', 'en')
+    vibe = query.data.replace('vibe_', '').replace('_', ' ').title()
+    
+    try:
+        # Load venues from JSON file
+        with open('data/happyhourstlv_enriched.json', 'r', encoding='utf-8') as f:
+            venues = json.load(f)
+        
+        # Filter venues by vibe
+        vibe_venues = [venue for venue in venues if vibe.lower() in venue.get('vibe', {}).get(lang, '').lower()]
+        
+        if not vibe_venues:
+            await query.edit_message_text(
+                text=f"No venues found with {vibe} vibe",
+                reply_markup=create_refresh_keyboard(lang)
+            )
+            return CHOOSING_ACTION
+        
+        # Check current time for happy hour status
+        current_time = datetime.now().strftime("%H:%M")
+        
+        # Format message with venues
+        message = f"🌟 Venues with {vibe} vibe:\n\n"
+        for venue in vibe_venues[:5]:  # Show top 5 venues
+            message += format_place_details(venue, None, lang)
+            if venue.get('happy_hour'):
+                start_time, end_time = venue['happy_hour'].split("-")
+                if start_time <= current_time <= end_time:
+                    message += f"\n🔥 {get_text('current_happy_hour', lang)}"
+            message += "\n\n"
+        
+        keyboard = create_refresh_keyboard(lang)
+        await query.edit_message_text(
+            text=message,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing vibe venues: {str(e)}")
+        await query.edit_message_text(
+            text=get_text('error_loading_venues', lang),
+            reply_markup=create_main_menu_keyboard(lang)
+        )
+    
+    return CHOOSING_ACTION
+
+def create_vibe_keyboard(lang):
+    """Create keyboard with vibe selection buttons."""
+    vibes = ["Chill", "Trendy", "Upscale", "Casual"]
+    keyboard = []
+    row = []
+    
+    for idx, vibe in enumerate(vibes):
+        row.append(InlineKeyboardButton(
+            f"🌟 {vibe}",
+            callback_data=f"vibe_{vibe.lower()}"
+        ))
+        if (idx + 1) % 2 == 0 or idx == len(vibes) - 1:
             keyboard.append(row)
             row = []
     
