@@ -3,15 +3,19 @@ import logging
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
     ConversationHandler,
+    MessageHandler,
+    filters,
 )
 import urllib.parse
+import json
+import math
 
 # Load environment variables
 load_dotenv()
@@ -23,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # States for conversation handler
-CHOOSING_LANGUAGE, CHOOSING_ACTION, CHOOSING_LOCATION, CHOOSING_VIBE = range(4)
+CHOOSING_LANGUAGE, CHOOSING_ACTION, CHOOSING_LOCATION, CHOOSING_VIBE, WAITING_FOR_LOCATION = range(5)
 
 # Translations dictionary
 TRANSLATIONS = {
@@ -33,20 +37,24 @@ TRANSLATIONS = {
             "I'm your personal guide to the best drink deals in Tel Aviv!\n\n"
             "Here's what I can help you with:\n"
             "🔍 Find happy hours by location\n"
+            "📍 Find venues near you\n"
             "⏰ See what's happening right now\n"
             "🌟 Check out popular spots\n"
             "ℹ️ Learn more about the bot\n\n"
             "What would you like to do?"
         ),
         'find_happy_hour': "🔍 Find Happy Hour",
+        'find_nearby': "📍 Find Nearby",
         'current_happy_hours': "⏰ Current Happy Hours",
         'popular_places': "🌟 Popular Places",
         'about': "ℹ️ About",
         'choose_area': "📍 Choose an area in Tel Aviv to explore happy hours:",
+        'share_location': "📍 Share your location to find nearby venues",
         'no_current_hours': "😔 No happy hours currently running!\n\nWould you like to see all available happy hours instead?",
         'current_hours_header': "🎉 Current happy hours (at {})",
         'popular_header': "🌟 Most Popular Happy Hours in Tel Aviv:",
         'area_header': "🎉 Happy Hours in {}:",
+        'nearby_header': "📍 Venues near you:",
         'more_options': "\nWant to see more options? Use the buttons below!",
         'refresh': "🔄 Refresh",
         'new_search': "🔍 New Search",
@@ -57,6 +65,7 @@ TRANSLATIONS = {
             "Features:\n"
             "• Real-time happy hour updates\n"
             "• Location-based search\n"
+            "• Find venues near you\n"
             "• Detailed venue information\n"
             "• Price range indicators\n"
             "• Venue vibes and descriptions\n\n"
@@ -71,6 +80,12 @@ TRANSLATIONS = {
             "Rothschild": "Rothschild",
             "Carmel Market": "Carmel Market"
         },
+        'error_loading_venues': "❌ Sorry, I couldn't load the venues at the moment. Please try again later.",
+        'error_processing_location': "❌ Sorry, I had trouble processing your location. Please try again.",
+        'no_nearby_venues': "😔 No venues found nearby. Try increasing the search radius or checking a different area.",
+        'current_happy_hour': "🔥 Currently in Happy Hour!",
+        'distance_away': "📍 {}km away",
+        'choose_radius': "📍 Choose search radius:",
     },
     'he': {
         'welcome': (
@@ -78,20 +93,24 @@ TRANSLATIONS = {
             "אני המדריך האישי שלך למבצעי השתייה הטובים ביותר בתל אביב!\n\n"
             "הנה במה אני יכול לעזור:\n"
             "🔍 חיפוש הפי אוור לפי מיקום\n"
+            "📍 מצא מקומות קרובים אליך\n"
             "⏰ ראה מה קורה עכשיו\n"
             "🌟 בדוק מקומות פופולריים\n"
             "ℹ️ מידע נוסף על הבוט\n\n"
             "מה תרצה לעשות?"
         ),
         'find_happy_hour': "🔍 חפש הפי אוור",
+        'find_nearby': "📍 מצא קרוב",
         'current_happy_hours': "⏰ הפי אוור עכשיו",
         'popular_places': "🌟 מקומות פופולריים",
         'about': "ℹ️ אודות",
         'choose_area': "📍 בחר אזור בתל אביב לחיפוש הפי אוור:",
+        'share_location': "📍 שתף את המיקום שלך למציאת מקומות קרובים",
         'no_current_hours': "😔 אין הפי אוור פעיל כרגע!\n\nהאם תרצה לראות את כל ההפי אוורס הזמינים?",
         'current_hours_header': "🎉 הפי אוור פעיל כרגע ({})",
         'popular_header': "🌟 ההפי אוורס הפופולריים בתל אביב:",
         'area_header': "🎉 הפי אוור ב{}:",
+        'nearby_header': "📍 מקומות קרובים אליך:",
         'more_options': "\nרוצה לראות עוד אפשרויות? השתמש בכפתורים למטה!",
         'refresh': "🔄 רענן",
         'new_search': "🔍 חיפוש חדש",
@@ -102,6 +121,7 @@ TRANSLATIONS = {
             "תכונות:\n"
             "• עדכוני הפי אוור בזמן אמת\n"
             "• חיפוש לפי מיקום\n"
+            "• מציאת מקומות קרובים\n"
             "• מידע מפורט על המקומות\n"
             "• אינדיקציית טווח מחירים\n"
             "• תיאור האווירה והמקום\n\n"
@@ -116,175 +136,143 @@ TRANSLATIONS = {
             "Rothschild": "רוטשילד",
             "Carmel Market": "שוק הכרמל"
         },
+        'error_loading_venues': "❌ מצטער, לא יכולתי לטעון את המקומות כרגע. אנא נסה שוב מאוחר יותר.",
+        'error_processing_location': "❌ מצטער, הייתה בעיה בעיבוד המיקום שלך. אנא נסה שוב.",
+        'no_nearby_venues': "😔 לא נמצאו מקומות בקרבת מקום. נסה להגדיל את רדיוס החיפוש או לבדוק אזור אחר.",
+        'current_happy_hour': "🔥 כרגע בהפי אוור!",
+        'distance_away': "📍 {} ק\"מ מכאן",
+        'choose_radius': "📍 בחר רדיוס חיפוש:",
     }
 }
 
-# Sample happy hour data with more locations and details
-SAMPLE_HAPPY_HOURS = {
-    "Dizengoff": [
-        {
-            "name": {"en": "Beer Garden", "he": "ביר גארדן"},
-            "address": "Dizengoff 100",
-            "coords": "32.0778,34.7732",
-            "happy_hour": "17:00-19:00",
-            "deals": {
-                "en": "50% off all beers, 1+1 on cocktails",
-                "he": "50% הנחה על כל הבירות, 1+1 על קוקטיילים"
-            },
-            "vibe": {"en": "Casual", "he": "לא פורמלי"},
-            "price_range": "$$",
-            "description": {
-                "en": "Relaxed garden atmosphere with a great selection of craft beers",
-                "he": "אווירת גן רגועה עם מבחר בירות מעולה"
-            }
-        },
-        {
-            "name": {"en": "Wine Bar", "he": "בר יין"},
-            "address": "Dizengoff 150",
-            "coords": "32.0785,34.7735",
-            "happy_hour": "18:00-20:00",
-            "deals": {
-                "en": "30% off wine bottles, free tapas",
-                "he": "30% הנחה על בקבוקי יין, טאפס חינם"
-            },
-            "vibe": {"en": "Upscale", "he": "יוקרתי"},
-            "price_range": "$$$",
-            "description": {
-                "en": "Elegant wine bar with an extensive selection of international wines",
-                "he": "בר יין אלגנטי עם מבחר יינות בינלאומי"
-            }
-        },
-        {
-            "name": {"en": "Sunset Lounge", "he": "סאנסט לאונג'"},
-            "address": "Dizengoff 220",
-            "coords": "32.0795,34.7738",
-            "happy_hour": "16:00-19:00",
-            "deals": {
-                "en": "40% off cocktails, half-price appetizers",
-                "he": "40% הנחה על קוקטיילים, מנות ראשונות בחצי מחיר"
-            },
-            "vibe": {"en": "Trendy", "he": "טרנדי"},
-            "price_range": "$$$",
-            "description": {
-                "en": "Rooftop bar with stunning sunset views and creative cocktails",
-                "he": "בר גג עם נוף שקיעה מדהים וקוקטיילים יצירתיים"
-            }
-        }
-    ],
-    "Florentin": [
-        {
-            "name": {"en": "Hipster Hub", "he": "היפסטר האב"},
-            "address": "Florentin 20",
-            "coords": "32.0565,34.7682",
-            "happy_hour": "16:00-19:00",
-            "deals": {
-                "en": "1+1 on draft beers, discounted snacks",
-                "he": "1+1 על בירות מהחבית, חטיפים מוזלים"
-            },
-            "vibe": {"en": "Alternative", "he": "אלטרנטיבי"},
-            "price_range": "$",
-            "description": {
-                "en": "Artistic venue with local craft beers and indie music",
-                "he": "מקום אומנותי עם בירות קראפט מקומיות ומוזיקת אינדי"
-            }
-        },
-        {
-            "name": {"en": "The Local", "he": "הלוקאל"},
-            "address": "Florentin 55",
-            "coords": "32.0571,34.7685",
-            "happy_hour": "17:00-20:00",
-            "deals": {
-                "en": "25% off all drinks, special happy hour menu",
-                "he": "25% הנחה על כל המשקאות, תפריט הפי אוור מיוחד"
-            },
-            "vibe": {"en": "Casual", "he": "לא פורמלי"},
-            "price_range": "$",
-            "description": {
-                "en": "Neighborhood favorite with great food and friendly atmosphere",
-                "he": "מקום שכונתי אהוב עם אוכל טוב ואווירה חברותית"
-            }
-        }
-    ],
-    "Rothschild": [
-        {
-            "name": {"en": "Cocktail Embassy", "he": "קוקטייל אמבסי"},
-            "address": "Rothschild 45",
-            "coords": "32.0632,34.7721",
-            "happy_hour": "18:00-21:00",
-            "deals": {
-                "en": "1+1 on signature cocktails, 30% off wine",
-                "he": "1+1 על קוקטיילים מיוחדים, 30% הנחה על יין"
-            },
-            "vibe": {"en": "Upscale", "he": "יוקרתי"},
-            "price_range": "$$$",
-            "description": {
-                "en": "Sophisticated cocktail bar with expert mixologists",
-                "he": "בר קוקטיילים מתוחכם עם ברמנים מומחים"
-            }
-        },
-        {
-            "name": {"en": "Boulevard Social", "he": "בולווארד סושיאל"},
-            "address": "Rothschild 90",
-            "coords": "32.0645,34.7728",
-            "happy_hour": "17:00-19:30",
-            "deals": {
-                "en": "40% off all drinks, complimentary bar snacks",
-                "he": "40% הנחה על כל המשקאות, חטיפי בר חינם"
-            },
-            "vibe": {"en": "Trendy", "he": "טרנדי"},
-            "price_range": "$$",
-            "description": {
-                "en": "Popular spot with boulevard views and great atmosphere",
-                "he": "מקום פופולרי עם נוף לשדרה ואווירה מעולה"
-            }
-        }
-    ],
-    "Carmel Market": [
-        {
-            "name": {"en": "Market Bar", "he": "בר השוק"},
-            "address": "HaCarmel 40",
-            "coords": "32.0685,34.7685",
-            "happy_hour": "15:00-18:00",
-            "deals": {
-                "en": "Local beer specials, 1+1 on house wine",
-                "he": "מבצעים על בירה מקומית, 1+1 על יין הבית"
-            },
-            "vibe": {"en": "Casual", "he": "לא פורמלי"},
-            "price_range": "$",
-            "description": {
-                "en": "Authentic market vibes with local flavors",
-                "he": "אווירת שוק אותנטית עם טעמים מקומיים"
-            }
-        },
-        {
-            "name": {"en": "Shuk Social", "he": "שוק סושיאל"},
-            "address": "HaCarmel 11",
-            "coords": "32.0681,34.7682",
-            "happy_hour": "16:00-19:00",
-            "deals": {
-                "en": "Beer buckets, half-price mezze platters",
-                "he": "דליי בירה, מארזי מזה בחצי מחיר"
-            },
-            "vibe": {"en": "Alternative", "he": "אלטרנטיבי"},
-            "price_range": "$",
-            "description": {
-                "en": "Hidden gem with great food and drink combinations",
-                "he": "פנינה נסתרת עם שילובי אוכל ושתייה מעולים"
-            }
-        }
-    ]
-}
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculate the distance between two points in kilometers"""
+    R = 6371  # Earth's radius in kilometers
+    
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
 
 def get_google_maps_link(coords):
-    """Generate Google Maps link from coordinates."""
-    return f"https://www.google.com/maps?q={coords}"
+    """Generate Google Maps link for navigation"""
+    return f"https://www.google.com/maps/dir/?api=1&destination={coords}"
 
 def get_text(key, lang, *args):
-    """Get translated text with optional formatting."""
-    text = TRANSLATIONS[lang][key]
-    if args:
-        return text.format(*args)
-    return text
+    """Get translated text"""
+    return TRANSLATIONS[lang][key].format(*args) if args else TRANSLATIONS[lang][key]
+
+def create_location_keyboard(lang):
+    """Create keyboard with location sharing button and options"""
+    keyboard = [
+        [KeyboardButton(get_text('share_location', lang), request_location=True)],
+        [
+            InlineKeyboardButton("📍 1km", callback_data="radius_1"),
+            InlineKeyboardButton("📍 2km", callback_data="radius_2"),
+            InlineKeyboardButton("📍 5km", callback_data="radius_5")
+        ],
+        [InlineKeyboardButton(get_text('main_menu', lang), callback_data='main_menu')]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def format_place_details(place, area, lang):
+    """Format place details with navigation link"""
+    name = place['name'][lang] if isinstance(place['name'], dict) else place['name']
+    address = place['address']
+    coords = place.get('coords', '')
+    happy_hour = place.get('happy_hour', '')
+    deals = place.get('deals', {}).get(lang, '') if isinstance(place.get('deals'), dict) else place.get('deals', '')
+    vibe = place.get('vibe', {}).get(lang, '') if isinstance(place.get('vibe'), dict) else place.get('vibe', '')
+    price_range = place.get('price_range', '')
+    description = place.get('description', {}).get(lang, '') if isinstance(place.get('description'), dict) else place.get('description', '')
+    
+    maps_link = get_google_maps_link(coords) if coords else None
+    
+    details = f"*{name}*\n"
+    details += f"📍 {address}\n"
+    if happy_hour:
+        details += f"⏰ Happy Hour: {happy_hour}\n"
+    if deals:
+        details += f"🎉 Deals: {deals}\n"
+    if vibe:
+        details += f"🌟 Vibe: {vibe}\n"
+    if price_range:
+        details += f"💰 Price Range: {price_range}\n"
+    if description:
+        details += f"\nℹ️ {description}\n"
+    if maps_link:
+        details += f"\n🗺 [Open in Maps]({maps_link})"
+    
+    return details
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle received location and find nearby venues"""
+    try:
+        user_location = update.message.location
+        lang = context.user_data.get('lang', 'en')
+        radius = context.user_data.get('search_radius', 2)  # Default 2km radius
+        
+        # Load venues from JSON file
+        try:
+            with open('data/happyhourstlv_enriched.json', 'r', encoding='utf-8') as f:
+                venues = json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading venues: {str(e)}")
+            await update.message.reply_text(get_text('error_loading_venues', lang))
+            return CHOOSING_ACTION
+        
+        # Calculate distances and sort venues
+        nearby_venues = []
+        current_time = datetime.now().strftime("%H:%M")
+        
+        for venue in venues:
+            if venue.get('latitude') and venue.get('longitude'):
+                distance = calculate_distance(
+                    user_location.latitude,
+                    user_location.longitude,
+                    venue['latitude'],
+                    venue['longitude']
+                )
+                if distance <= radius:  # Within specified radius
+                    venue['distance'] = distance
+                    # Check if venue has current happy hour
+                    if venue.get('happy_hour'):
+                        start_time, end_time = venue['happy_hour'].split("-")
+                        if start_time <= current_time <= end_time:
+                            venue['has_current_happy_hour'] = True
+                    nearby_venues.append(venue)
+        
+        # Sort by distance and current happy hour status
+        nearby_venues.sort(key=lambda x: (not x.get('has_current_happy_hour', False), x['distance']))
+        
+        if not nearby_venues:
+            await update.message.reply_text(get_text('no_nearby_venues', lang))
+            return CHOOSING_ACTION
+        
+        # Format and send nearby venues
+        message = get_text('nearby_header', lang) + "\n\n"
+        for venue in nearby_venues[:5]:  # Show top 5 closest venues
+            message += format_place_details(venue, None, lang)
+            if venue.get('has_current_happy_hour'):
+                message += "🔥 *Currently in Happy Hour!*\n"
+            message += f"📍 {venue['distance']:.1f}km away\n\n"
+        
+        keyboard = create_refresh_keyboard(lang)
+        await update.message.reply_text(
+            message,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+        return CHOOSING_ACTION
+        
+    except Exception as e:
+        logger.error(f"Error handling location: {str(e)}")
+        await update.message.reply_text(get_text('error_processing_location', lang))
+        return CHOOSING_ACTION
 
 def create_location_keyboard(lang):
     """Create keyboard with all locations in the selected language."""
@@ -299,37 +287,17 @@ def create_location_keyboard(lang):
     keyboard.append([InlineKeyboardButton(get_text('main_menu', lang), callback_data="start")])
     return keyboard
 
-async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show language selection buttons."""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the conversation and ask user to choose a language."""
     keyboard = [
         [
-            InlineKeyboardButton("English 🇺🇸", callback_data="lang_en"),
+            InlineKeyboardButton("English 🇬🇧", callback_data="lang_en"),
             InlineKeyboardButton("עברית 🇮🇱", callback_data="lang_he"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Please choose your language:\nאנא בחר את השפה שלך:",
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text("Choose your language / בחר את השפה שלך", reply_markup=reply_markup)
     return CHOOSING_LANGUAGE
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start the bot and show language selection."""
-    return await choose_language(update, context)
-
-def format_place_details(place, area, lang):
-    """Format place details with emojis and styling."""
-    maps_link = get_google_maps_link(place['coords'])
-    return (
-        f"🏢 *{place['name'][lang]}* ({area})\n"
-        f"📍 [{place['address']}]({maps_link})\n"
-        f"⏰ {place['happy_hour']}\n"
-        f"💰 {place['deals'][lang]}\n"
-        f"🎯 {place['vibe'][lang]}\n"
-        f"💳 {place['price_range']}\n"
-        f"📝 {place['description'][lang]}\n"
-    )
 
 def create_main_menu_keyboard(lang):
     """Create the main menu keyboard with translated buttons."""
@@ -355,173 +323,101 @@ def create_refresh_keyboard(lang):
         [InlineKeyboardButton(get_text('main_menu', lang), callback_data="start")]
     ])
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button presses."""
+async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle language selection and show main menu."""
     query = update.callback_query
     await query.answer()
     
-    # Handle language selection
-    if query.data.startswith("lang_"):
-        lang = query.data.replace("lang_", "")
-        context.user_data['language'] = lang
-        keyboard = create_main_menu_keyboard(lang)
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=get_text('welcome', lang),
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        return CHOOSING_ACTION
+    lang = query.data.split("_")[1]
+    context.user_data["lang"] = lang
+    
+    keyboard = create_main_menu_keyboard(lang)
+    await query.edit_message_text(text=get_text("welcome", lang), reply_markup=keyboard)
+    return CHOOSING_ACTION
 
-    # Get user's language preference
-    lang = context.user_data.get('language', 'en')
-
-    if query.data == "change_lang":
-        keyboard = [
-            [
-                InlineKeyboardButton("English 🇺🇸", callback_data="lang_en"),
-                InlineKeyboardButton("עברית 🇮🇱", callback_data="lang_he"),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle main menu actions."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = context.user_data.get("lang", "en")
+    
+    if query.data == "find_happy_hour":
+        keyboard = create_area_keyboard(lang)
         await query.edit_message_text(
-            "Please choose your language:\nאנא בחר את השפה שלך:",
-            reply_markup=reply_markup
-        )
-        return CHOOSING_LANGUAGE
-
-    if query.data == "start":
-        keyboard = create_main_menu_keyboard(lang)
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=get_text('welcome', lang),
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        return CHOOSING_ACTION
-
-    elif query.data == "find":
-        keyboard = create_location_keyboard(lang)
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=get_text('choose_area', lang),
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+            text=get_text("choose_area", lang),
+            reply_markup=keyboard
         )
         return CHOOSING_LOCATION
-    
-    elif query.data == "current":
-        current_time = datetime.now().strftime("%H:%M")
-        message = get_text('current_hours_header', lang, current_time) + "\n\n"
-        found = False
-        
-        for area, places in SAMPLE_HAPPY_HOURS.items():
-            for place in places:
-                start_time, end_time = place["happy_hour"].split("-")
-                if start_time <= current_time <= end_time:
-                    message += format_place_details(place, area, lang) + "\n"
-                    found = True
-        
-        if not found:
-            message = get_text('no_current_hours', lang)
-        
+    elif query.data == "find_nearby":
+        keyboard = create_location_keyboard(lang)
         await query.edit_message_text(
-            text=message,
-            reply_markup=create_refresh_keyboard(lang),
-            parse_mode='Markdown'
+            text=get_text("share_location", lang),
+            reply_markup=keyboard
         )
-        return CHOOSING_ACTION
-
-    elif query.data == "popular":
-        message = get_text('popular_header', lang) + "\n\n"
-        # Showing 3 curated options with different vibes
-        popular_places = [
-            ("Cocktail Embassy", "Rothschild"),
-            ("Beer Garden", "Dizengoff"),
-            ("Market Bar", "Carmel Market")
-        ]
-        
-        for place_name, area in popular_places:
-            for place in SAMPLE_HAPPY_HOURS[area]:
-                if place["name"] == place_name:
-                    message += format_place_details(place, area, lang) + "\n"
-        
+        return WAITING_FOR_LOCATION
+    elif query.data.startswith("radius_"):
+        radius = int(query.data.split("_")[1])
+        context.user_data["search_radius"] = radius
+        keyboard = create_location_keyboard(lang)
         await query.edit_message_text(
-            text=message,
-            reply_markup=create_refresh_keyboard(lang),
-            parse_mode='Markdown'
+            text=get_text("share_location", lang),
+            reply_markup=keyboard
         )
-        return CHOOSING_ACTION
-    
-    elif query.data.startswith("loc_"):
-        location = query.data.replace("loc_", "").capitalize()
-        if location.lower() == "carmel market":
-            location = "Carmel Market"
-            
-        if location in SAMPLE_HAPPY_HOURS:
-            message = get_text('area_header', lang, location) + "\n\n"
-            places = SAMPLE_HAPPY_HOURS[location]
-            
-            # Show 3 random places if more than 3 exist
-            if len(places) > 3:
-                import random
-                places = random.sample(places, 3)
-            
-            for place in places:
-                message += format_place_details(place, location, lang) + "\n"
-                
-            message += get_text('more_options', lang)
-            
-            await query.edit_message_text(
-                text=message,
-                reply_markup=create_refresh_keyboard(lang),
-                parse_mode='Markdown'
-            )
-        else:
-            await query.edit_message_text(
-                text="Sorry, no happy hours found in this area.",
-                reply_markup=create_refresh_keyboard(lang)
-            )
-        return CHOOSING_ACTION
-
-    elif query.data == "refresh":
-        # Simulate refreshing by showing different options if available
-        return await button_callback(update, context)  # Re-run the last command
-    
+        return WAITING_FOR_LOCATION
+    elif query.data == "current_happy_hours":
+        return await show_current_happy_hours(update, context)
+    elif query.data == "popular_places":
+        return await show_popular_places(update, context)
     elif query.data == "about":
+        keyboard = create_main_menu_keyboard(lang)
         await query.edit_message_text(
-            text=get_text('about_text', lang),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="start")]]),
-            parse_mode='Markdown'
+            text=get_text("about_text", lang),
+            reply_markup=keyboard
+        )
+        return CHOOSING_ACTION
+    elif query.data == "main_menu":
+        keyboard = create_main_menu_keyboard(lang)
+        await query.edit_message_text(
+            text=get_text("welcome_back", lang),
+            reply_markup=keyboard
         )
         return CHOOSING_ACTION
 
 def main():
     """Start the bot."""
-    # Load token from environment variable
-    token = os.getenv('TELEGRAM_TOKEN')
-    if not token:
-        raise ValueError("No TELEGRAM_TOKEN found in environment variables")
+    # Create the Application and pass it your bot's token.
+    application = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
 
-    # Create application
-    application = Application.builder().token(token).build()
-
-    # Add handlers
+    # Add conversation handler with the states
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            CHOOSING_LANGUAGE: [CallbackQueryHandler(button_callback)],
-            CHOOSING_ACTION: [CallbackQueryHandler(button_callback)],
-            CHOOSING_LOCATION: [CallbackQueryHandler(button_callback)],
-            CHOOSING_VIBE: [CallbackQueryHandler(button_callback)],
+            CHOOSING_LANGUAGE: [
+                CallbackQueryHandler(choose_language, pattern="^lang_")
+            ],
+            CHOOSING_ACTION: [
+                CallbackQueryHandler(handle_action),
+                MessageHandler(filters.LOCATION, handle_location)
+            ],
+            CHOOSING_LOCATION: [
+                CallbackQueryHandler(show_area_venues, pattern="^area_")
+            ],
+            CHOOSING_VIBE: [
+                CallbackQueryHandler(show_vibe_venues, pattern="^vibe_")
+            ],
+            WAITING_FOR_LOCATION: [
+                MessageHandler(filters.LOCATION, handle_location),
+                CallbackQueryHandler(handle_action, pattern="^radius_")
+            ]
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("start", start)],
     )
 
     application.add_handler(conv_handler)
 
-    # Run the bot with polling
-    application.run_polling(drop_pending_updates=True)
+    # Start the Bot
+    application.run_polling()
 
 if __name__ == "__main__":
     main() 
