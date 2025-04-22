@@ -384,6 +384,77 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHOOSING_ACTION
 
+async def show_area_venues(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show venues in the selected area."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = context.user_data.get('lang', 'en')
+    area = query.data.replace('area_', '').replace('_', ' ').title()
+    
+    try:
+        # Load venues from JSON file
+        with open('data/happyhourstlv_enriched.json', 'r', encoding='utf-8') as f:
+            venues = json.load(f)
+        
+        # Filter venues by area
+        area_venues = [venue for venue in venues if venue.get('area', '').lower() == area.lower()]
+        
+        if not area_venues:
+            await query.edit_message_text(
+                text=f"No venues found in {area}",
+                reply_markup=create_refresh_keyboard(lang)
+            )
+            return CHOOSING_ACTION
+        
+        # Check current time for happy hour status
+        current_time = datetime.now().strftime("%H:%M")
+        
+        # Format message with venues
+        message = get_text('area_header', lang, area) + "\n\n"
+        for venue in area_venues[:5]:  # Show top 5 venues
+            message += format_place_details(venue, area, lang)
+            if venue.get('happy_hour'):
+                start_time, end_time = venue['happy_hour'].split("-")
+                if start_time <= current_time <= end_time:
+                    message += f"\n🔥 {get_text('current_happy_hour', lang)}"
+            message += "\n\n"
+        
+        keyboard = create_refresh_keyboard(lang)
+        await query.edit_message_text(
+            text=message,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing area venues: {str(e)}")
+        await query.edit_message_text(
+            text=get_text('error_loading_venues', lang),
+            reply_markup=create_main_menu_keyboard(lang)
+        )
+    
+    return CHOOSING_ACTION
+
+def create_area_keyboard(lang):
+    """Create keyboard with area selection buttons."""
+    areas = ["Dizengoff", "Florentin", "Rothschild", "Carmel_Market"]
+    keyboard = []
+    row = []
+    
+    for idx, area in enumerate(areas):
+        translated_area = TRANSLATIONS[lang]['locations'][area.replace('_', ' ')]
+        row.append(InlineKeyboardButton(
+            translated_area,
+            callback_data=f"area_{area.lower()}"
+        ))
+        if (idx + 1) % 2 == 0 or idx == len(areas) - 1:
+            keyboard.append(row)
+            row = []
+    
+    keyboard.append([InlineKeyboardButton(get_text('main_menu', lang), callback_data="main_menu")])
+    return InlineKeyboardMarkup(keyboard)
+
 def main():
     """Start the bot."""
     # Create the Application and pass it your bot's token.
