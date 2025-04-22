@@ -16,9 +16,17 @@ from telegram.ext import (
 import urllib.parse
 import json
 import math
+import os.path
 
 # Load environment variables
 load_dotenv()
+
+# Get the directory containing the bot.py file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Go up one level to the project root
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+# Define the path to the data file
+VENUES_FILE = os.path.join(PROJECT_ROOT, 'data', 'happyhourstlv_enriched.json')
 
 # Enable logging
 logging.basicConfig(
@@ -225,6 +233,24 @@ def format_place_details(place, area, lang):
     
     return details
 
+async def load_venues():
+    """Load venues from JSON file with error handling"""
+    try:
+        logger.info(f"Attempting to load venues from: {VENUES_FILE}")
+        with open(VENUES_FILE, 'r', encoding='utf-8') as f:
+            venues = json.load(f)
+            logger.info(f"Successfully loaded {len(venues)} venues")
+            return venues
+    except FileNotFoundError:
+        logger.error(f"Venues file not found at: {VENUES_FILE}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error loading venues: {str(e)}")
+        return None
+
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle received location and find nearby venues"""
     try:
@@ -232,12 +258,8 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lang = context.user_data.get('lang', 'en')
         radius = context.user_data.get('search_radius', 2)  # Default 2km radius
         
-        # Load venues from JSON file
-        try:
-            with open('data/happyhourstlv_enriched.json', 'r', encoding='utf-8') as f:
-                venues = json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading venues: {str(e)}")
+        venues = await load_venues()
+        if not venues:
             await update.message.reply_text(get_text('error_loading_venues', lang))
             return CHOOSING_ACTION
         
@@ -330,9 +352,9 @@ def create_refresh_keyboard(lang):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(get_text('refresh', lang), callback_data="refresh"),
-            InlineKeyboardButton(get_text('new_search', lang), callback_data="find"),
+            InlineKeyboardButton(get_text('find_happy_hour', lang), callback_data="find_happy_hour"),
         ],
-        [InlineKeyboardButton(get_text('main_menu', lang), callback_data="start")]
+        [InlineKeyboardButton(get_text('main_menu', lang), callback_data="main_menu")]
     ])
 
 async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -384,6 +406,15 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
         return WAITING_FOR_LOCATION
+    elif query.data == "refresh":
+        # Re-run the last action based on the current state
+        state = context.user_data.get("last_state")
+        if state == "area":
+            area = context.user_data.get("last_area")
+            if area:
+                query.data = f"area_{area.lower()}"
+                return await show_area_venues(update, context)
+        return await handle_action(update, context)
     elif query.data == "current_happy_hours":
         return await show_current_happy_hours(update, context)
     elif query.data == "popular_places":
@@ -411,40 +442,44 @@ async def show_area_venues(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get('lang', 'en')
     area = query.data.replace('area_', '').replace('_', ' ').title()
     
-    try:
-        # Load venues from JSON file
-        with open('data/happyhourstlv_enriched.json', 'r', encoding='utf-8') as f:
-            venues = json.load(f)
-        
-        # Filter venues by area
-        area_venues = [venue for venue in venues if area.lower() in venue.get('address', '').lower()]
-        
-        if not area_venues:
-            await query.edit_message_text(
-                text=f"No venues found in {area}",
-                reply_markup=create_refresh_keyboard(lang)
-            )
-            return CHOOSING_ACTION
-        
-        # Format message with venues
-        message = get_text('area_header', lang, area) + "\n\n"
-        for venue in area_venues[:5]:  # Show top 5 venues
-            message += format_place_details(venue, area, lang)
-            message += "\n\n"
-        
-        keyboard = create_refresh_keyboard(lang)
-        await query.edit_message_text(
-            text=message,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error showing area venues: {str(e)}")
+    # Store the last state and area for refresh functionality
+    context.user_data["last_state"] = "area"
+    context.user_data["last_area"] = area
+    
+    venues = await load_venues()
+    if not venues:
         await query.edit_message_text(
             text=get_text('error_loading_venues', lang),
             reply_markup=create_main_menu_keyboard(lang)
         )
+        return CHOOSING_ACTION
+    
+    # Filter venues by area (more flexible matching)
+    area_venues = [
+        venue for venue in venues 
+        if area.lower() in venue.get('address', '').lower() or 
+           area.lower() in venue.get('name', '').lower()
+    ]
+    
+    if not area_venues:
+        await query.edit_message_text(
+            text=f"No venues found in {area}",
+            reply_markup=create_refresh_keyboard(lang)
+        )
+        return CHOOSING_ACTION
+    
+    # Format message with venues
+    message = get_text('area_header', lang, area) + "\n\n"
+    for venue in area_venues[:5]:  # Show top 5 venues
+        message += format_place_details(venue, area, lang)
+        message += "\n\n"
+    
+    keyboard = create_refresh_keyboard(lang)
+    await query.edit_message_text(
+        text=message,
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
     
     return CHOOSING_ACTION
 

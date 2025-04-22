@@ -8,5 +8,43 @@
         "hours": "Sun-Thu, 18:00-20:00, Fri 19:00-21:00",
         "phone": "03-544-6537",
         "website": "http://223.co.il/"
+    },
+    {
+        "name": "Port Said",
+        "address": "Har Sinai St 5, Florentin",
+        "latitude": 32.0573,
+        "longitude": 34.7717,
+        "deal": "Sun-Thu, 17:00-19:00",
+        "hours": "Sun-Thu, 17:00-19:00",
+        "phone": "03-620-7436",
+        "website": "https://www.facebook.com/PortSaidTLV/"
+    },
+    {
+        "name": "Shishko",
+        "address": "Florentin St 44",
+        "latitude": 32.0561,
+        "longitude": 34.7685,
+        "deal": "Sun-Thu, 18:00-20:00",
+        "hours": "Sun-Thu, 18:00-20:00",
+        "phone": "03-518-7496"
+    },
+    {
+        "name": "Beer Garden",
+        "address": "Carmel Market 1",
+        "latitude": 32.0685,
+        "longitude": 34.7689,
+        "deal": "All day happy hour Sunday",
+        "hours": "Sun, 12:00-23:00",
+        "phone": "03-516-9234"
+    },
+    {
+        "name": "Rothschild 12",
+        "address": "Rothschild Blvd 12",
+        "latitude": 32.0632,
+        "longitude": 34.7717,
+        "deal": "Sun-Thu, 18:00-21:00",
+        "hours": "Sun-Thu, 18:00-21:00",
+        "phone": "03-510-6430",
+        "website": "http://rothschild12.co.il"
     }
 ] 
